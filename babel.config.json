@@ -1,0 +1,27 @@
+{
+    "presets": [
+        ["@babel/preset-typescript"],
+        [
+            "@babel/preset-env",
+            {
+                "targets": {
+                    "ie": "11"
+                },
+                "useBuiltIns": "usage",
+                "corejs": { "version": "3.49", "proposals": false },
+                "exclude": [
+                    "@babel/plugin-transform-async-to-generator",
+                    "@babel/plugin-transform-async-generator-functions",
+                    "@babel/plugin-transform-regenerator",
+                    "transform-async-to-generator",
+                    "transform-async-generator-functions",
+                    "transform-regenerator"
+                ]
+            }
+        ]
+    ],
+    "plugins": [
+        "@babel/plugin-transform-class-properties",
+        "@babel/plugin-transform-classes"
+    ]
+}

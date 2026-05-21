@@ -1,0 +1,30 @@
+{
+  "name": "arc-experiments",
+  "module": "index.ts",
+  "devDependencies": {
+    "@babel/cli": "^7.28.6",
+    "@babel/core": "^7.29.0",
+    "@babel/preset-env": "^7.29.5",
+    "@babel/preset-typescript": "^7.28.5",
+    "@rollup/plugin-babel": "^7.0.0",
+    "@rollup/plugin-commonjs": "^29.0.2",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@types/bun": "latest",
+    "core-js": "^3.49.0",
+    "prettier": "^3.8.3",
+    "rollup": "^4.60.4"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "private": true,
+  "scripts": {
+    "prepare-for-arc": "rollup -c rollup.config.js",
+    "run-arc": "cd arc && ../gleam run -- ../dist/index.js",
+    "make-it-arc": "bun prepare-for-arc && bun run-arc"
+  },
+  "type": "module",
+  "dependencies": {
+    "@kaito-http/core": "v3"
+  }
+}
