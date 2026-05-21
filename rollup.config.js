@@ -11,6 +11,7 @@ import stripSymbolThrows from './babel/babel-plugin-strip-symbol-throws.js';
 import wrapUserlandEntry from './babel/babel-plugin-wrap-userland-entry.js';
 import defilterDemap from './babel/babel-plugin-defilter-demap.js';
 import fs from "node:fs";
+import path from "node:path";
 
 const extensions = ['.js', '.ts', ".tsx"];
 
@@ -32,12 +33,32 @@ const postBundleBabel = (name, plugin) => ({
 // arc-monkey-patches.js is split around the FOOTER_BELOW marker:
 //   - banner half runs BEFORE core-js polyfills (prepended to bundle)
 //   - footer half runs AFTER core-js polyfills, just before requireUserCode()
-// arc-std-lib.js is appended after the monkey-patches banner — it doesn't
-// care when it runs relative to core-js, but it must exist before user code.
+// arc-std-lib/**.js is concatenated (sorted lexicographically by relative
+// path) and appended after the monkey-patches banner. It doesn't care when
+// it runs relative to core-js, but it must exist before user code. Use a
+// numeric prefix on a file when ordering matters (e.g. 00-require-registry.js
+// installs the registry that node-*.js files write into).
 const monkeyPatches = fs.readFileSync('./arc-monkey-patches.js', 'utf8').split('// FOOTER_BELOW');
 const monkeyPatchesBanner = monkeyPatches[0];
 const monkeyPatchesFooter = monkeyPatches[1] || '';
-const stdLib = fs.readFileSync('./arc-std-lib.js', 'utf8');
+
+function collectStdLibFiles(dir) {
+    const out = [];
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+            out.push(...collectStdLibFiles(full));
+        } else if (entry.isFile() && entry.name.endsWith('.js')) {
+            out.push(full);
+        }
+    }
+    return out;
+}
+
+const stdLibFiles = collectStdLibFiles('./arc-std-lib').sort();
+const stdLib = stdLibFiles
+    .map((f) => '// --- arc-std-lib: ' + f + ' ---\n' + fs.readFileSync(f, 'utf8'))
+    .join('\n');
 
 export default {
     input: 'src/index.ts',

@@ -108,20 +108,32 @@ Around the bundle we wrap two pieces of hand-written runtime code:
   so core-js takes its full-replacement code path instead of trying to
   "wrap" them. Also stubs `ArrayBuffer`, `DataView`, `queueMicrotask` and
   fixes `String`/`Number`/`Boolean` coercion + `Symbol[@@toPrimitive]`.
-- **`arc-std-lib.js`** — also banner. Adds `Headers`, `Request`, `Response`.
-  These aren't monkey patches — Arc just doesn't ship fetch primitives, so
-  we provide our own. Synchronous under the hood (the body-reading methods
-  return `Promise.resolve(x)` and the `strip-async` pass collapses them).
-  Also installs a global `process` (just `env.NODE_ENV = "production"` plus
-  a no-op `nextTick`) and a global `require()` shim that returns minimal
-  stubs for the four Node built-ins `react-dom/server` pulls in: `util`
-  (only `TextEncoder` — `.encode()` returns the input string unchanged so
-  precomputed HTML chunks stay string-shaped through the legacy
-  `renderToString` path), `crypto` (no-op `createHash`), `async_hooks`
-  (`AsyncLocalStorage` with a single hidden slot), and `stream` (empty
-  `Readable` constructor — the streaming render paths aren't reachable
-  from `renderToString` but the module-load reference still needs to
-  resolve).
+- **`arc-std-lib/**.js`** — also banner. A folder of small files, each
+  filling in one thing Arc doesn't ship but should. These aren't monkey
+  patches (no deletion criterion) — Arc is unlikely to grow `Headers` /
+  `Request` / `Response` itself, and the Node built-in shims will always
+  be needed in some form for libraries that `require()` them.
+
+  At build time `rollup.config.js` walks the folder recursively, sorts
+  entries lexicographically by relative path, and concatenates them.
+  Ordering, when it matters, is encoded as a numeric prefix on the
+  filename (`00-`, `10-`, …). Today the only ordered dependency is the
+  `require()` registry: `00-require-registry.js` must install the empty
+  global before any `node-*.js` file writes a stub into it.
+
+  Current contents:
+
+  | File | What it provides |
+  |---|---|
+  | `00-require-registry.js` | Global `require(name)` plus an internal `__arcModules` registry. Throws for unknown module names so missing stubs are loud. |
+  | `fetch.js` | `Headers`, `Request`, `Response` (incl. `Response.json` / `Response.error` / `Response.redirect`). Body-reading methods return `Promise.resolve(x)` and get collapsed by the `strip-async` pass. |
+  | `node-async-hooks.js` | `require('async_hooks')` → `{ AsyncLocalStorage }` backed by a single hidden slot. |
+  | `node-crypto.js` | `require('crypto')` → `{ createHash }` returning a no-op hasher (concat input, return concat). |
+  | `node-stream.js` | `require('stream')` → `{ Readable }` empty constructor. Only the module-load reference matters; `renderToString` never reaches the streaming path. |
+  | `node-util.js` | `require('util')` → `{ TextEncoder }`. `.encode()` returns the input string unchanged so HTML chunks precomputed at module init stay string-shaped through `renderToString`'s legacy destination. |
+  | `process.js` | Global `process` with `env.NODE_ENV = "production"` (react picks the production codepath), synchronous `nextTick`, empty `versions`. |
+
+  See `arc-std-lib/README.md` for how to add a new file.
 - **`arc-monkey-patches.js`** (footer half, below the `// FOOTER_BELOW`
   marker) — injected just before `requireUserCode()` is called, i.e.
   AFTER core-js has installed its polyfills. Use this for patches that
@@ -210,7 +222,7 @@ delete the workaround.
 ```
 arc/                       # Arc runtime checkout (git submodule / sibling). Do NOT edit.
 arc-monkey-patches.js      # Temporary Arc-bug workarounds. Split by FOOTER_BELOW marker.
-arc-std-lib.js             # Things Arc lacks but should always have: Headers/Request/Response, process, require() shims for Node built-ins.
+arc-std-lib/               # Things Arc lacks but should always have. One file per feature, concatenated at build time.
 babel/                     # Post-bundle Babel plugins. One file = one rewrite.
 rollup.config.js           # Wires everything together.
 src/                       # Your TypeScript code. Start here.
