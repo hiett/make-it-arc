@@ -1,7 +1,8 @@
 /// <reference path="../arc/types/src/index.d.ts" />
 
-import { createKaitoHandler } from "@kaito-http/core";
-import { getContext, router } from "./context.ts";
+import {createKaitoHandler} from "@kaito-http/core";
+import {getContext, router} from "./context.ts";
+import {serverRenderReact} from "./test-component.tsx";
 
 async function doTheThing() {
   const base = router()
@@ -16,6 +17,13 @@ async function doTheThing() {
       return {
         something: "goodbye",
       };
+    })
+    .get("/react", async (req) => {
+      return new Response(serverRenderReact(), {
+        headers: {
+          "Content-Type": "text/plain"
+        }
+      })
     });
 
   const handle = createKaitoHandler({
@@ -42,7 +50,7 @@ async function doTheThing() {
   Arc.log("/ Response:", await handle(request));
 
   const request2 = new Request({
-    url: "https://google.com/goodbye",
+    url: "https://google.com/react",
     method: "GET",
   });
   Arc.log("/goodbye Request:", request2);

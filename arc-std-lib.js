@@ -280,3 +280,124 @@
   globalThis.Response = ArcResponse;
 
 })();
+
+// ---------------------------------------------------------------------------
+// Node built-in module stubs (util, crypto, async_hooks, stream).
+//
+// Rollup's commonjs plugin leaves bare `require('util')` / `require('crypto')`
+// / `require('async_hooks')` / `require('stream')` calls in the bundle for
+// modules it considers external (Node built-ins). Arc has no module loader
+// at all — `require` is undefined and throws at load time.
+//
+// Here we install a global `require` that returns minimal stubs for the four
+// Node built-ins react-dom/server pulls in. Only the pieces actually exercised
+// by `renderToString` need to be real:
+//
+//   util.TextEncoder       — used to "precompute" static HTML chunks at module
+//                            init. renderToString's destination.push handler
+//                            just concatenates chunks as strings, so we make
+//                            encode() return the input string unchanged.
+//                            This keeps everything string-shaped end-to-end
+//                            (no Uint8Array needed) and `result += chunk`
+//                            works as react-dom's legacy path expects.
+//   crypto.createHash      — used for componentKeyPath in dev paths; we hand
+//                            back a no-op hasher that returns a stable string.
+//   async_hooks.AsyncLocalStorage — only the constructor and getStore/run/
+//                            enterWith surface are touched; back it with a
+//                            single hidden slot.
+//   stream.Readable        — only referenced from renderToPipeableStream,
+//                            which renderToString does not invoke; a no-op
+//                            constructor is enough to satisfy module load.
+//
+// Remove individual stubs once Arc grows a real require() / native bindings.
+// ---------------------------------------------------------------------------
+(function () {
+  function ArcTextEncoder() {}
+  ArcTextEncoder.prototype.encode = function (s) {
+    return s == null ? "" : String(s);
+  };
+  ArcTextEncoder.prototype.encodeInto = function (s, target) {
+    var str = s == null ? "" : String(s);
+    return { read: str.length, written: str.length };
+  };
+
+  var utilStub = { TextEncoder: ArcTextEncoder };
+
+  var cryptoStub = {
+    createHash: function () {
+      var data = "";
+      var hash = {
+        update: function (s) {
+          data += s == null ? "" : String(s);
+          return hash;
+        },
+        digest: function () {
+          return data;
+        }
+      };
+      return hash;
+    }
+  };
+
+  function ArcAsyncLocalStorage() {
+    this._store = undefined;
+  }
+  ArcAsyncLocalStorage.prototype.getStore = function () {
+    return this._store;
+  };
+  ArcAsyncLocalStorage.prototype.run = function (value, fn) {
+    var prev = this._store;
+    this._store = value;
+    try {
+      return fn();
+    } finally {
+      this._store = prev;
+    }
+  };
+  ArcAsyncLocalStorage.prototype.enterWith = function (value) {
+    this._store = value;
+  };
+  ArcAsyncLocalStorage.prototype.exit = function (fn) {
+    var prev = this._store;
+    this._store = undefined;
+    try {
+      return fn();
+    } finally {
+      this._store = prev;
+    }
+  };
+  ArcAsyncLocalStorage.prototype.disable = function () {
+    this._store = undefined;
+  };
+
+  var asyncHooksStub = { AsyncLocalStorage: ArcAsyncLocalStorage };
+
+  function ArcReadable() {}
+  var streamStub = { Readable: ArcReadable };
+
+  var modules = {
+    util: utilStub,
+    crypto: cryptoStub,
+    async_hooks: asyncHooksStub,
+    stream: streamStub
+  };
+
+  if (typeof globalThis.process === "undefined") {
+    globalThis.process = {
+      env: { NODE_ENV: "production" },
+      nextTick: function (fn) {
+        try { fn(); } catch (e) {}
+      },
+      versions: {}
+    };
+  }
+
+  if (typeof globalThis.require === "undefined") {
+    globalThis.require = function (name) {
+      if (Object.prototype.hasOwnProperty.call(modules, name)) {
+        return modules[name];
+      }
+      throw new Error("Arc: cannot require module '" + name + "'");
+    };
+  }
+})();

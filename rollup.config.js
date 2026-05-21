@@ -12,7 +12,7 @@ import wrapUserlandEntry from './babel/babel-plugin-wrap-userland-entry.js';
 import defilterDemap from './babel/babel-plugin-defilter-demap.js';
 import fs from "node:fs";
 
-const extensions = ['.js', '.ts'];
+const extensions = ['.js', '.ts', ".tsx"];
 
 const postBundleBabel = (name, plugin) => ({
     name,

@@ -5,11 +5,14 @@
     "@babel/cli": "^7.28.6",
     "@babel/core": "^7.29.0",
     "@babel/preset-env": "^7.29.5",
+    "@babel/preset-react": "^7.28.5",
     "@babel/preset-typescript": "^7.28.5",
     "@rollup/plugin-babel": "^7.0.0",
     "@rollup/plugin-commonjs": "^29.0.2",
     "@rollup/plugin-node-resolve": "^16.0.3",
     "@types/bun": "latest",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
     "core-js": "^3.49.0",
     "prettier": "^3.8.3",
     "rollup": "^4.60.4"
@@ -25,6 +28,8 @@
   },
   "type": "module",
   "dependencies": {
-    "@kaito-http/core": "v3"
+    "@kaito-http/core": "v3",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
   }
 }

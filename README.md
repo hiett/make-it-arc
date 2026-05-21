@@ -15,8 +15,9 @@ Gleam / Erlang that doesn't yet support all of modern JavaScript.
 
 ## What this is good for
 
-- Stress-testing Arc against real libraries (currently
-  [`@kaito-http/core`](https://github.com/kaito-http/kaito) is the canary).
+- Stress-testing Arc against real libraries (current canaries:
+  [`@kaito-http/core`](https://github.com/kaito-http/kaito) and
+  `react` + `react-dom/server` for SSR via `renderToString`).
 - Finding concrete bugs / missing features in Arc — every monkey patch in
   `arc-monkey-patches.js` is a one-line description of something Arc gets
   wrong.
@@ -89,7 +90,7 @@ Applied in this order (see `rollup.config.js`):
 
 | Plugin | What it does | Why Arc needs it |
 |---|---|---|
-| `babel-plugin-defer-requires` | Moves every top-level `requireXxx()` call to the end of the bundle, preserving relative order. | core-js modules reference vars declared in *later* modules. Without reordering, you get forward-reference `TypeError`s. |
+| `babel-plugin-defer-requires` | Moves every top-level `requireXxx()` call to the end of the bundle, preserving relative order. Also defers `var x = requireY()` declarations emitted by rollup's commonjs plugin for user-driven CJS imports, plus any downstream `var z = fn(x)` whose initializer reads a deferred binding (transitively). `var` is hoisted, so only the *initialization* is delayed — function bodies declared earlier still see the binding by the time they're called. | core-js modules reference vars declared in *later* modules. Without reordering, you get forward-reference `TypeError`s. The transitive case shows up the moment user code imports a CJS library: `var React = getDefaultExportFromCjs(reactExports)` runs *between* the deferred `requireReact()` call and the polyfills, so we need to drag it (and `serverRenderReact`'s wiring) along to the deferred block too. |
 | `babel-plugin-strip-async` | Rewrites `async`/`await`, `Promise.resolve`, `.then`, etc. into synchronous equivalents. | Arc has no event loop and no microtask queue. |
 | `babel-plugin-bind-fexpr-names` | Wraps named `function NAME(...)` expressions so `NAME` is actually bound inside the body. | Arc's parser doesn't bind a named function expression's own name in its body — regenerator output blows up otherwise. |
 | `babel-plugin-strip-symbol-throws` | Deletes core-js's `throw new TypeError('Cannot convert a Symbol value to a string')` guard. | Arc misclassifies some plain strings as `Symbol` via `@@toStringTag`, tripping the guard. |
@@ -111,6 +112,16 @@ Around the bundle we wrap two pieces of hand-written runtime code:
   These aren't monkey patches — Arc just doesn't ship fetch primitives, so
   we provide our own. Synchronous under the hood (the body-reading methods
   return `Promise.resolve(x)` and the `strip-async` pass collapses them).
+  Also installs a global `process` (just `env.NODE_ENV = "production"` plus
+  a no-op `nextTick`) and a global `require()` shim that returns minimal
+  stubs for the four Node built-ins `react-dom/server` pulls in: `util`
+  (only `TextEncoder` — `.encode()` returns the input string unchanged so
+  precomputed HTML chunks stay string-shaped through the legacy
+  `renderToString` path), `crypto` (no-op `createHash`), `async_hooks`
+  (`AsyncLocalStorage` with a single hidden slot), and `stream` (empty
+  `Readable` constructor — the streaming render paths aren't reachable
+  from `renderToString` but the module-load reference still needs to
+  resolve).
 - **`arc-monkey-patches.js`** (footer half, below the `// FOOTER_BELOW`
   marker) — injected just before `requireUserCode()` is called, i.e.
   AFTER core-js has installed its polyfills. Use this for patches that
@@ -199,7 +210,7 @@ delete the workaround.
 ```
 arc/                       # Arc runtime checkout (git submodule / sibling). Do NOT edit.
 arc-monkey-patches.js      # Temporary Arc-bug workarounds. Split by FOOTER_BELOW marker.
-arc-std-lib.js             # Things Arc lacks but should always have: Headers/Request/Response.
+arc-std-lib.js             # Things Arc lacks but should always have: Headers/Request/Response, process, require() shims for Node built-ins.
 babel/                     # Post-bundle Babel plugins. One file = one rewrite.
 rollup.config.js           # Wires everything together.
 src/                       # Your TypeScript code. Start here.
