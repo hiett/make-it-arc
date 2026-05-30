@@ -1,19 +1,27 @@
 /// <reference path="../arc/types/src/index.d.ts" />
 
-import {createKaitoHandler} from "@kaito-http/core";
-import {getContext, router} from "./context.ts";
-import {serverRenderReact} from "./test-component.tsx";
+import { createKaitoHandler } from "@kaito-http/core";
+import { getContext, router } from "./context.ts";
+import { serverRenderReact } from "./test-component.tsx";
 
-async function doTheThing() {
+type Message = {
+  path: string;
+};
+type Context = {};
+
+type DanceSystem = {
+  emit: (data: any) => void;
+};
+declare const Dance: DanceSystem;
+
+function makeKaito() {
   const base = router()
     .get("/", async (req) => {
-      Arc.log("Running /");
       return {
         hello: "world",
       };
     })
     .get("/goodbye", async (req) => {
-      Arc.log("Running /goodbye");
       return {
         something: "goodbye",
       };
@@ -21,9 +29,9 @@ async function doTheThing() {
     .get("/react", async (req) => {
       return new Response(serverRenderReact(), {
         headers: {
-          "Content-Type": "text/plain"
-        }
-      })
+          "Content-Type": "text/plain",
+        },
+      });
     });
 
   const handle = createKaitoHandler({
@@ -37,30 +45,28 @@ async function doTheThing() {
     },
   });
 
-  const url = new URL("https://google.com/goodbye");
-  Arc.log(url);
-  Arc.log(JSON.stringify(url));
-  Arc.log("path", url.pathname);
-
-  const request = new Request({
-    url: "https://google.com",
-    method: "GET",
-  });
-  Arc.log("/ Request:", request);
-  Arc.log("/ Response:", await handle(request));
-
-  const request2 = new Request({
-    url: "https://google.com/react",
-    method: "GET",
-  });
-  Arc.log("/goodbye Request:", request2);
-  try {
-    Arc.log("/goodbye Response:", await handle(request2));
-  } catch (e: any) {
-    Arc.log("/goodbye ERROR:", e && e.message, "stack:", e && e.stack);
-  }
+  return handle;
 }
 
-doTheThing().then(() => {
-  Arc.log("Done running.");
-});
+let cachedKaito: ReturnType<typeof makeKaito> | null = null;
+
+function getKaito() {
+  if (cachedKaito) {
+    return cachedKaito;
+  }
+
+  return (cachedKaito = makeKaito());
+}
+
+export async function receive(message: string, context: Context) {
+  Dance.emit("Good morning all, let's get this show on the road...");
+  const handle = getKaito();
+
+  const path = message || "/";
+  const request = new Request({
+    url: `https://google.com${path}`,
+    method: "GET",
+  });
+  Dance.emit(`${path} Request:` + JSON.stringify(request));
+  Dance.emit(`${path} Response:` + JSON.stringify(await handle(request)));
+}

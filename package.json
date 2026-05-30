@@ -1,35 +1,70 @@
 {
   "name": "arc-experiments",
-  "module": "index.ts",
-  "devDependencies": {
-    "@babel/cli": "^7.28.6",
+  "main": "./lib/make-it-arc.js",
+  "module": "./lib/make-it-arc.js",
+  "types": "./lib/make-it-arc.d.ts",
+  "exports": {
+    ".": {
+      "browser": {
+        "types": "./lib/make-it-arc.browser.d.ts",
+        "default": "./lib/make-it-arc.browser.js"
+      },
+      "node": {
+        "types": "./lib/make-it-arc.d.ts",
+        "default": "./lib/make-it-arc.js"
+      },
+      "default": {
+        "types": "./lib/make-it-arc.browser.d.ts",
+        "default": "./lib/make-it-arc.browser.js"
+      }
+    }
+  },
+  "browser": "./lib/make-it-arc.browser.js",
+  "files": [
+    "lib",
+    "babel",
+    "arc-monkey-patches.js",
+    "arc-std-lib"
+  ],
+  "dependencies": {
     "@babel/core": "^7.29.0",
+    "@babel/plugin-transform-class-properties": "^7.27.1",
+    "@babel/plugin-transform-classes": "^7.27.1",
     "@babel/preset-env": "^7.29.5",
     "@babel/preset-react": "^7.28.5",
     "@babel/preset-typescript": "^7.28.5",
+    "@babel/standalone": "^7.29.4",
+    "@kaito-http/core": "v3",
+    "@rollup/browser": "^4.60.4",
     "@rollup/plugin-babel": "^7.0.0",
     "@rollup/plugin-commonjs": "^29.0.2",
     "@rollup/plugin-node-resolve": "^16.0.3",
+    "core-js": "^3.49.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "rollup": "^4.60.4"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.28.6",
+    "@playwright/test": "^1.60.0",
+    "@types/babel__core": "^7.20.5",
     "@types/bun": "latest",
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
-    "core-js": "^3.49.0",
-    "prettier": "^3.8.3",
-    "rollup": "^4.60.4"
+    "esbuild": "^0.28.0",
+    "prettier": "^3.8.3"
   },
   "peerDependencies": {
     "typescript": "^5"
   },
   "private": true,
   "scripts": {
-    "prepare-for-arc": "rollup -c rollup.config.js",
+    "gen": "bun scripts/build-runtime-assets.mjs",
+    "build": "bun run gen && tsc -p tsconfig.build.json",
+    "prepare-for-arc": "bun run gen && bun build.js",
     "run-arc": "cd arc && ../gleam run -- ../dist/index.js",
-    "make-it-arc": "bun prepare-for-arc && bun run-arc"
+    "make-it-arc": "bun prepare-for-arc && bun run-arc",
+    "test": "bun run gen && playwright test"
   },
-  "type": "module",
-  "dependencies": {
-    "@kaito-http/core": "v3",
-    "react": "^19.2.6",
-    "react-dom": "^19.2.6"
-  }
+  "type": "module"
 }

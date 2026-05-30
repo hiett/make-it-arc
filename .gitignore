@@ -4,6 +4,7 @@ node_modules
 # output
 out
 dist
+lib
 *.tgz
 
 # code coverage
@@ -36,3 +37,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 gleam
 .claude
 arc/
+runtime-assets.generated.ts
+.test-browser
+test-results
+playwright-report

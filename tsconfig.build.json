@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": false,
+    "outDir": "./lib",
+    "rootDir": ".",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": false,
+    "verbatimModuleSyntax": false,
+    "allowJs": true,
+    "checkJs": false,
+    "skipLibCheck": true
+  },
+  "include": [
+    "make-it-arc.ts",
+    "make-it-arc-core.ts",
+    "make-it-arc.browser.ts",
+    "runtime-assets.generated.ts",
+    "babel/**/*.js"
+  ],
+  "exclude": ["node_modules", "dist", "lib", "test"]
+}

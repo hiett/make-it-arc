@@ -15,9 +15,7 @@
 // Import/export declarations stay at module scope; only the remaining
 // top-level statements are moved into the wrapper.
 
-import path from "node:path";
-
-const DEFAULT_ENTRY = path.join("src", "index.ts");
+const DEFAULT_ENTRY = "src/index.ts";
 
 export default function ({ types: t }) {
     return {
@@ -39,6 +37,44 @@ export default function ({ types: t }) {
                             t.isTSImportEqualsDeclaration?.(stmt)
                         ) {
                             top.push(stmt);
+                        } else if (
+                            t.isFunctionDeclaration(stmt) ||
+                            t.isClassDeclaration(stmt)
+                        ) {
+                            // Hoisted, side-effect-free bindings. Keep them at
+                            // module scope so exported functions (which stay at
+                            // top) can still reference them — moving them inside
+                            // requireUserCode would put them out of scope and
+                            // rollup would tree-shake the lot.
+                            top.push(stmt);
+                        } else if (
+                            t.isVariableDeclaration(stmt) &&
+                            stmt.declarations.every((d) => t.isIdentifier(d.id))
+                        ) {
+                            // Split `let x = <init>` into a hoisted binding
+                            // (`var x;`) at module scope plus a deferred
+                            // assignment (`x = <init>;`) inside requireUserCode.
+                            // Keeps the binding referenceable by exports while
+                            // still running the (possibly polyfill-dependent)
+                            // initializer after polyfills load.
+                            for (const d of stmt.declarations) {
+                                top.push(
+                                    t.variableDeclaration("var", [
+                                        t.variableDeclarator(t.identifier(d.id.name))
+                                    ])
+                                );
+                                if (d.init) {
+                                    inner.push(
+                                        t.expressionStatement(
+                                            t.assignmentExpression(
+                                                "=",
+                                                t.identifier(d.id.name),
+                                                d.init
+                                            )
+                                        )
+                                    );
+                                }
+                            }
                         } else {
                             inner.push(stmt);
                         }

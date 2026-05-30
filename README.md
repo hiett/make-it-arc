@@ -15,6 +15,10 @@ Gleam / Erlang that doesn't yet support all of modern JavaScript.
 
 ## What this is good for
 
+- A **standalone build step**: point `makeItArc()` at your TypeScript (a
+  folder, a single file, or an in-memory file tree) and get back one
+  Arc-ready bundle as a string. Use it from a Node script, a Bun script, or
+  *directly in the browser*.
 - Stress-testing Arc against real libraries (current canaries:
   [`@kaito-http/core`](https://github.com/kaito-http/kaito) and
   `react` + `react-dom/server` for SSR via `renderToString`).
@@ -30,7 +34,73 @@ Gleam / Erlang that doesn't yet support all of modern JavaScript.
 
 ---
 
-## Try it out
+## Use it as a build step
+
+The whole toolchain is exposed as a single function, `makeItArc(source)`,
+which returns the finished Arc bundle as a `string`. There are two entry
+points, both default-exporting the same function:
+
+| Import | Environment | Accepts |
+|---|---|---|
+| `make-it-arc` (`make-it-arc.ts`) | Node / Bun / Deno | a **path** (string) *or* a **file tree** |
+| `make-it-arc/browser` (`make-it-arc.browser.ts`) | the browser | a **file tree** only |
+
+### Path mode (Node/Bun) — bundle real source on disk
+
+Give it a directory (it looks for `index.{ts,tsx,js}`) or a single entry
+file. This is the full pipeline — Rollup + `@rollup/plugin-commonjs` +
+`@rollup/plugin-node-resolve` — so your entry can `import` real npm
+packages (including CJS ones like `react`).
+
+```ts
+import { makeItArc } from "make-it-arc";
+import fs from "node:fs";
+
+const code = await makeItArc("./src");        // folder with index.ts
+// const code = await makeItArc("./src/index.ts"); // or a single file
+fs.writeFileSync("dist/index.js", code);
+```
+
+That is exactly what `build.js` in this repo does.
+
+### Tree mode — bundle an in-memory virtual filesystem
+
+Pass a `{ [path]: contents }` map (entry auto-detected as the lone
+`index.*`), or `{ entry, files }` to be explicit. Tree mode uses a virtual
+filesystem and resolves only relative imports between the files you hand it
+— no node_modules, no disk access — so the **exact same input produces
+byte-identical output in Node and in the browser** (there's a Playwright
+parity test asserting this).
+
+```ts
+import { makeItArc } from "make-it-arc";
+
+const code = await makeItArc({
+  "index.ts": `import { greet } from "./greet.ts";\nconsole.log(greet("arc"));`,
+  "greet.ts": `export const greet = (n: string) => "hello " + n;`,
+});
+```
+
+### In the browser
+
+The browser entry is the same API, backed by `@rollup/browser` (WASM) and
+`@babel/standalone` instead of the Node toolchain:
+
+```ts
+import { makeItArc } from "make-it-arc/browser";
+
+const code = await makeItArc({
+  "index.ts": `console.log("hello from arc");`,
+});
+```
+
+Lower-level pieces are exported too if you need them: `bundleTree(entry,
+files)`, `normalizeTreeSource(source)`, `virtualFsPlugin(files)`, and the
+`FileTree` / `MakeItArcSource` types.
+
+---
+
+## Try it out (the canary app)
 
 You need [Bun](https://bun.sh) and [Gleam](https://gleam.run) installed.
 
@@ -49,7 +119,9 @@ bun make-it-arc
 
 `bun make-it-arc` does two things:
 
-1. `bun prepare-for-arc` — runs Rollup, producing `dist/index.js`.
+1. `bun prepare-for-arc` — regenerates runtime assets (`bun run gen`) then
+   runs `build.js`, which calls `makeItArc("./src")` and writes
+   `dist/index.js`.
 2. `bun run-arc` — `cd arc && gleam run -- ../dist/index.js`.
 
 Edit `src/index.ts`, run `bun make-it-arc` again, watch it work (or break).
@@ -58,12 +130,25 @@ Arc is updated frequently by other contributors. **Always `git pull` inside
 `arc/` before debugging a failure** — your patch list may already be
 shorter than you think.
 
+### Other scripts
+
+| Script | What it does |
+|---|---|
+| `bun run gen` | Regenerates `runtime-assets.generated.ts` from `arc-monkey-patches.js` + `arc-std-lib/**`. Run automatically by the build/test scripts; run it by hand after editing a patch or std-lib file. |
+| `bun run build` | `gen` + `tsc -p tsconfig.build.json` → compiles the tool itself into `lib/` (JS + `.d.ts`) for publishing/consuming as a package. |
+| `bun test` | `gen` + Playwright parity test: builds the browser bundle, runs the same fixture through Node and the browser, asserts byte-identical output. |
+
 ---
 
 ## The build chain, end to end
 
-Source lives in `src/**/*.ts`. Output is a single CJS file at `dist/index.js`
-which Arc loads. Between source and output there are roughly six stages:
+Everything below lives in `make-it-arc.ts` (Node path mode) and
+`make-it-arc-core.ts` (the shared tree-mode core that the browser build also
+uses). The two share the same plugin ordering so output stays consistent.
+
+Source goes in, a single **ESM** bundle comes out — Arc is ESM-native and
+wants native `export`, not `module.exports`. Between source and output there
+are roughly six stages:
 
 ### 1. Per-file: Babel (in-Rollup)
 
@@ -84,12 +169,14 @@ All the per-file output (plus the core-js CJS modules pulled in by
 former-CJS module wrapped in its own `requireXxx()` function so we can
 reorder them later.
 
-### 3. Post-bundle: Babel passes on `dist/index.js`
+### 3. Post-bundle: Babel passes on the bundled output
 
-Applied in this order (see `rollup.config.js`):
+Each runs as a Rollup `renderChunk` pass, applied in this order (see the
+`plugins` array in `make-it-arc.ts` / `make-it-arc-core.ts`):
 
 | Plugin | What it does | Why Arc needs it |
 |---|---|---|
+| `babel-plugin-externals-to-require` | Rewrites the top-level `import X from 'util'` declarations that `format: 'es'` emits for externalized node builtins back into `var X = require('util')`. | Arc keeps native ESM `export` on the way out, but its module loader can't resolve bare-specifier `import`s — so builtins get routed through the `arc-std-lib` `require()` registry instead. |
 | `babel-plugin-defer-requires` | Moves every top-level `requireXxx()` call to the end of the bundle, preserving relative order. Also defers `var x = requireY()` declarations emitted by rollup's commonjs plugin for user-driven CJS imports, plus any downstream `var z = fn(x)` whose initializer reads a deferred binding (transitively). `var` is hoisted, so only the *initialization* is delayed — function bodies declared earlier still see the binding by the time they're called. | core-js modules reference vars declared in *later* modules. Without reordering, you get forward-reference `TypeError`s. The transitive case shows up the moment user code imports a CJS library: `var React = getDefaultExportFromCjs(reactExports)` runs *between* the deferred `requireReact()` call and the polyfills, so we need to drag it (and `serverRenderReact`'s wiring) along to the deferred block too. |
 | `babel-plugin-strip-async` | Rewrites `async`/`await`, `Promise.resolve`, `.then`, etc. into synchronous equivalents. | Arc has no event loop and no microtask queue. |
 | `babel-plugin-bind-fexpr-names` | Wraps named `function NAME(...)` expressions so `NAME` is actually bound inside the body. | Arc's parser doesn't bind a named function expression's own name in its body — regenerator output blows up otherwise. |
@@ -114,8 +201,12 @@ Around the bundle we wrap two pieces of hand-written runtime code:
   `Request` / `Response` itself, and the Node built-in shims will always
   be needed in some form for libraries that `require()` them.
 
-  At build time `rollup.config.js` walks the folder recursively, sorts
-  entries lexicographically by relative path, and concatenates them.
+  At `bun run gen` time `scripts/build-runtime-assets.mjs` walks the folder
+  recursively, sorts entries lexicographically by relative path, concatenates
+  them, and inlines the result (plus the two halves of
+  `arc-monkey-patches.js`) into `runtime-assets.generated.ts` as `BANNER` /
+  `FOOTER` / `STD_LIB` string constants. Inlining at gen time is what lets the
+  bundler run in the browser with no filesystem.
   Ordering, when it matters, is encoded as a numeric prefix on the
   filename (`00-`, `10-`, …). Today the only ordered dependency is the
   `require()` registry: `00-require-registry.js` must install the empty
@@ -142,7 +233,8 @@ Around the bundle we wrap two pieces of hand-written runtime code:
 
 ### 5. Output
 
-`dist/index.js` — a single CJS bundle Arc can read.
+`makeItArc()` returns the finished bundle as a string — a single native-ESM
+file Arc can read. In the canary app `build.js` writes it to `dist/index.js`.
 
 ### 6. Run
 
@@ -179,8 +271,10 @@ two-line repro first.
 ### Step 2 — decide: babel plugin or runtime patch?
 
 - **Babel plugin** when the fix is "rewrite this AST shape into something
-  Arc can handle." Live in `babel/`, one file per plugin, wired into
-  `rollup.config.js`. Apply post-bundle unless there's a reason not to.
+  Arc can handle." Live in `babel/`, one file per plugin, wired into the
+  `plugins` array in **both** `make-it-arc.ts` and `make-it-arc-core.ts`
+  (keep them in sync, or Node and browser output will diverge). Apply
+  post-bundle unless there's a reason not to.
 - **Banner monkey patch** when Arc's global *shouldn't be used at all* by
   core-js (force-`undefined` it so core-js polyfills it itself), or when
   you need to stub something *before* core-js init touches it.
@@ -220,13 +314,20 @@ delete the workaround.
 ## Layout
 
 ```
+make-it-arc.ts             # Node entry. Path mode (rollup + commonjs + node-resolve) and tree mode.
+make-it-arc-core.ts        # Shared, browser-safe tree-mode bundler (@rollup/browser + @babel/standalone).
+make-it-arc.browser.ts     # Browser entry. Re-exports the core.
+build.js                   # Canary-app driver: makeItArc("./src") -> dist/index.js.
+scripts/                   # build-runtime-assets.mjs (the `gen` step).
+runtime-assets.generated.ts# Generated. BANNER/FOOTER/STD_LIB inlined from the files below. Never edit by hand.
 arc/                       # Arc runtime checkout (git submodule / sibling). Do NOT edit.
 arc-monkey-patches.js      # Temporary Arc-bug workarounds. Split by FOOTER_BELOW marker.
-arc-std-lib/               # Things Arc lacks but should always have. One file per feature, concatenated at build time.
-babel/                     # Post-bundle Babel plugins. One file = one rewrite.
-rollup.config.js           # Wires everything together.
-src/                       # Your TypeScript code. Start here.
-dist/index.js              # Build output. Never edit by hand.
+arc-std-lib/               # Things Arc lacks but should always have. One file per feature, concatenated at gen time.
+babel/                     # Babel plugins. One file = one rewrite.
+src/                       # The canary TypeScript app. Start here.
+test/                      # Playwright Node/browser parity test.
+dist/index.js              # Canary build output. Never edit by hand.
+lib/                       # `bun run build` output: the tool compiled for publishing.
 ```
 
 ## License
